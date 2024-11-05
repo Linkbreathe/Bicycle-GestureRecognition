@@ -1,4 +1,10 @@
-#include "BluetoothSerial.h"
+#include "BluetoothSerial.h" 
+#include <FastLED.h>
+
+#define NUM_LEDS 4
+#define LED_PIN 13
+
+CRGB leds[NUM_LEDS];
 
 String device_name = "ESP32-BT-Slave";
 
@@ -14,38 +20,52 @@ String device_name = "ESP32-BT-Slave";
 
 BluetoothSerial SerialBT;
 
-// 定义定时发送的间隔（毫秒）
-const unsigned long sendInterval = 5000;
-unsigned long previousSendMillis = 0;
+
+
+unsigned long ledStateStartTime = 0;
+const unsigned long ledStateDuration = 1000;  // Duration for each LED state in milliseconds
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
+  FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, NUM_LEDS);
+
+  
   SerialBT.begin(device_name);  // Bluetooth device name
-  //SerialBT.deleteAllBondedDevices(); // Uncomment this to delete paired devices; Must be called after begin
   Serial.printf("The device with name \"%s\" is started.\nNow you can pair it with Bluetooth!\n", device_name.c_str());
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
-
-  // 每隔 sendInterval 毫秒发送一次消息
-  if (currentMillis - previousSendMillis >= sendInterval) {
-    previousSendMillis = currentMillis;
-    String message = "Hello from Slave at " + String(currentMillis / 1000) + "s";
-    SerialBT.println(message);
-    Serial.println("Sent to Master: " + message);
-  }
-
-  // 检查是否有来自主设备的消息
-  if (SerialBT.available()) {
+   // Check for messages from the master device
+  // if (SerialBT.available()) {
+  //   String incoming = SerialBT.readStringUntil('\n');
+  //   Serial.println("Received from Master: " + incoming);
+  // }
+   if (SerialBT.available()) {
     String incoming = SerialBT.readStringUntil('\n');
+    incoming.trim();
     Serial.println("Received from Master: " + incoming);
 
-    // 可选：根据收到的消息进行响应
-    String response = "Acknowledged: " + incoming;
-    SerialBT.println(response);
-    Serial.println("Sent to Master: " + response);
+    if (incoming == "LEFT") {
+      lightLEDs(CRGB::Red);
+    } else if (incoming == "STOP") {
+      turnOffLEDs();
+    }
   }
 
-  delay(20);
+   delay(20);
 }
+
+void lightLEDs(CRGB color) {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = color;
+  }
+  FastLED.show();
+}
+
+void turnOffLEDs() {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Black;
+  }
+  FastLED.show();
+}
+
