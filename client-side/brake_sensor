@@ -1,0 +1,116 @@
+#include <CapacitiveSensor.h>
+
+
+#define SENDER_PIN 14   // Sender pin (G14)
+#define RECEIVER_PIN 33 // Receiver pin (G33)
+
+
+CapacitiveSensor cs_14_33 = CapacitiveSensor(SENDER_PIN, RECEIVER_PIN);
+
+long baseline = 0;
+long baselineMovingAvg = 0; // Smoothed baseline
+long lightTouchThreshold = 0;
+long pressThreshold = 0;
+const float baselineSmoothingFactor = 0.1; // Adjust for smoother baseline adjustment
+unsigned long lastRecalibrationTime = 0;
+const int recalibrationInterval = 15000; //  15 seconds?
+
+// Smoothing Variables
+long smoothedTouchValue = 0;
+const float smoothingFactor = 0.2; // Adjust between 0.1 and 0.5 for stronger or weaker smoothing
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Starting Capacitive Sensor System...");
+
+  // Perform initial calibration
+  baseline = performCalibration(5000);
+  baselineMovingAvg = baseline; // Initialize smoothed baseline
+  updateThresholds();
+
+  Serial.print("Initial Baseline: ");
+  Serial.println(baseline);
+  Serial.print("Initial Light Touch Threshold: ");
+  Serial.println(lightTouchThreshold);
+  Serial.print("Initial Press Threshold: ");
+  Serial.println(pressThreshold);
+
+  // Log header for CSV output
+  Serial.println("RawValue,SmoothedValue,RelativeValue,Baseline,State");
+}
+
+void loop() {
+  // Read current touch value
+  long rawTouchValue = cs_14_33.capacitiveSensor(10);
+
+  // Apply smoothing to the touch value
+  smoothedTouchValue = (smoothingFactor * rawTouchValue) + ((1 - smoothingFactor) * smoothedTouchValue);
+
+  // Calculate relative value
+  long relativeValue = smoothedTouchValue - baselineMovingAvg;
+
+  // Perform adaptive recalibration if needed
+  if (millis() - lastRecalibrationTime > recalibrationInterval) {
+    baseline = performCalibration(2000); 
+    baselineMovingAvg = (baselineSmoothingFactor * baseline) + ((1 - baselineSmoothingFactor) * baselineMovingAvg);
+    updateThresholds();
+    lastRecalibrationTime = millis();
+
+    Serial.println("Recalibration Done:");
+    Serial.print("New Baseline: ");
+    Serial.println(baselineMovingAvg);
+    Serial.print("New Light Touch Threshold: ");
+    Serial.println(lightTouchThreshold);
+    Serial.print("New Press Threshold: ");
+    Serial.println(pressThreshold);
+  }
+
+  // Determine state
+  const char *state;
+  if (relativeValue > pressThreshold) {
+    state = "Pressed";
+  } else if (relativeValue > lightTouchThreshold) {
+    state = "Resting";
+  } else {
+    state = "Untouched";
+  }
+
+  // Log data
+  logData(rawTouchValue, smoothedTouchValue, relativeValue, baselineMovingAvg, state);
+
+  delay(50); // Stabilize the readings
+}
+
+// Perform baseline calibration
+long performCalibration(int duration) {
+  long sum = 0;
+  int count = 0;
+  unsigned long startTime = millis();
+
+  while (millis() - startTime < duration) {
+    long value = cs_14_33.capacitiveSensor(10);
+    sum += value;
+    count++;
+    delay(50);
+  }
+  return sum / count;
+}
+
+// Update thresholds 
+void updateThresholds() {
+  lightTouchThreshold = baselineMovingAvg + (baselineMovingAvg * 0.1); // 10% above baseline
+  pressThreshold = baselineMovingAvg + (baselineMovingAvg * 0.9);      // 30% above baseline
+}
+
+// Logging data to determine thresholds
+void logData(long rawValue, long smoothedValue, long relativeValue, long baseline, const char *state) {
+  Serial.print(rawValue);   // Raw touch value
+  Serial.print(",");
+  Serial.print(smoothedValue); // Smoothed touch value
+  Serial.print(",");
+  Serial.print(relativeValue); // Relative to baseline
+  Serial.print(",");
+  Serial.print(baseline);   // Current baseline
+  Serial.print(",");
+  Serial.println(state);    // State ("Untouched", "Resting", "Pressed")
+}
