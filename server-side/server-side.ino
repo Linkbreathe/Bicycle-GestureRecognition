@@ -45,19 +45,19 @@ struct BrakeConfig {
 };
 
 SliderConfig leftSliders[] = {
-  {CapacitiveSensor(senderPin, 13), 60, 147, 1.0},
+  {CapacitiveSensor(senderPin, 13), 60, 147, 0.0},
   {CapacitiveSensor(senderPin, 12), 20, 130, 0.5},
-  {CapacitiveSensor(senderPin, 14), 30, 154, 0.0}
+  {CapacitiveSensor(senderPin, 14), 30, 154, 1.0}
 };
 
 SliderConfig rightSliders[] = {
-  {CapacitiveSensor(senderPin, 27), 20, 147, 0.0},
-  {CapacitiveSensor(senderPin, 33), 25, 130, 0.5},
-  {CapacitiveSensor(senderPin, 32), 21, 154, 1.0}
+  {CapacitiveSensor(senderPin, 27), 35, 147, 1.0},
+  {CapacitiveSensor(senderPin, 33), 50, 130, 0.5},
+  {CapacitiveSensor(senderPin, 32), 21, 154, 0.0}
 };
 
 // Brake configuration
-BrakeConfig brake = {CapacitiveSensor(senderPin, 2), 100, 1000};
+//BrakeConfig brake = {CapacitiveSensor(senderPin, 2), 100, 1000};
 
 // Slide detection configuration
 const int meanWindowSize = 5;
@@ -105,7 +105,7 @@ void loop() {
   double rightMeanPos = calculateWeightedPosition(rightSliders, rightPositionHistory, rightHistoryIndex, previousRightMeanPos, isSlidingRight, lastSlideRightTime, "RIGHT");
 
   // Brake check and message sending
-  checkBrake();
+  //checkBrake();
 
   // Check if stop message should be sent
   checkAndSendStopMessage();
@@ -186,7 +186,7 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
   }
 }
 
-void checkBrake() {
+/*void checkBrake() {
   long brakeValue = brake.sensor.capacitiveSensor(30);  // Read brake sensor value
   
   // Determine brake level based on the sensor value
@@ -211,7 +211,7 @@ void checkBrake() {
     Serial.println("Sent to Slave: " + brakeMessage);
     SerialBT.println(brakeMessage);
   }
-}
+}*/
 
 void sendMessage(String message) {
   Serial.println("Sent to Slave: " + message);
