@@ -56,8 +56,7 @@ SliderConfig rightSliders[] = {
   {CapacitiveSensor(senderPin, 32), 21, 154, 0.0}
 };
 
-// Brake configuration
-//BrakeConfig brake = {CapacitiveSensor(senderPin, 2), 100, 1000};
+BrakeConfig brake = {CapacitiveSensor(senderPin, 2), 100, 1000};
 
 // Slide detection configuration
 const int meanWindowSize = 5;
@@ -70,11 +69,12 @@ double previousLeftMeanPos = -1.0, previousRightMeanPos = -1.0;
 bool isSlidingLeft = false, isSlidingRight = false;
 unsigned long lastSlideLeftTime = 0, lastSlideRightTime = 0;
 
-// Brake thresholds
+// Brake detection configuration
 bool isBreaking = false;
-int brakeLowThresh = 100;  // Low brake threshold
-int brakeMidThresh = 500;  // Medium brake threshold
-int brakeHighThresh = 900; // High brake threshold
+bool lastBrakeState = false;
+int brakeThreshold = 2000;
+long smoothedTouchValue = 0;
+const float smoothingFactor = 0.2;
 
 void setup() {
   Serial.begin(9600);
@@ -105,7 +105,7 @@ void loop() {
   double rightMeanPos = calculateWeightedPosition(rightSliders, rightPositionHistory, rightHistoryIndex, previousRightMeanPos, isSlidingRight, lastSlideRightTime, "RIGHT");
 
   // Brake check and message sending
-  //checkBrake();
+  checkBrakeState();
 
   // Check if stop message should be sent
   checkAndSendStopMessage();
@@ -186,32 +186,30 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
   }
 }
 
-/*void checkBrake() {
-  long brakeValue = brake.sensor.capacitiveSensor(30);  // Read brake sensor value
-  
-  // Determine brake level based on the sensor value
-  if (brakeValue > brake.minThreshold) {
-    isBreaking = true;  // Brake force is being applied
-  } else {
-    isBreaking = false; // No brake force detected
-  }
+void checkBrakeState() {
+  // Read and smooth the brake sensor value
+  long rawBrakeValue = brakeSensor.capacitiveSensor(10);
+  smoothedBrakeValue = (smoothingFactor * rawBrakeValue) + ((1 - smoothingFactor) * smoothedBrakeValue);
 
-  String brakeMessage = "BRAKE LOW";  // Default brake state
+  // Determine if braking is happening
+  isBreaking = smoothedBrakeValue >= brakeThreshold;
 
-  if (isBreaking) {
-    if (brakeValue >= brakeHighThresh) {
-      brakeMessage = "BRAKE HIGH";
-    } else if (brakeValue >= brakeMidThresh) {
-      brakeMessage = "BRAKE MID";
+  // If the brake state has changed, send the appropriate message
+  if (isBreaking != lastBrakeState) {
+    if (isBreaking) {
+      sendMessage("BRAKE");
     } else {
-      brakeMessage = "BRAKE LOW";
+      sendMessage("STOP BRAKE");
     }
-
-    // Send brake state to the slave
-    Serial.println("Sent to Slave: " + brakeMessage);
-    SerialBT.println(brakeMessage);
+    lastBrakeState = isBreaking; // Update the last known state
   }
-}*/
+}
+
+// Send message over Bluetooth
+void sendMessage(String message) {
+  Serial.println("Sent to Slave: " + message);
+  SerialBT.println(message);
+}
 
 void sendMessage(String message) {
   Serial.println("Sent to Slave: " + message);
