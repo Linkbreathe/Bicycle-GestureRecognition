@@ -49,8 +49,8 @@ SliderConfig rightSliders[] = {
 
 // Sliding state variables
 const int meanWindowSize = 3; // Reduced for responsiveness
-const double slideThreshold = 0.03; // Reduced for greater sensitivity
-const unsigned long slideEndTimeout = 500; // Increased for slower movements
+const double slideThreshold = 0.02; // Reduced for greater sensitivity
+const unsigned long slideEndTimeout = 750; // Increased for slower movements
 const double restingDecayFactor = 0.95; // Decay for resting pressure
 double leftPositionHistory[meanWindowSize] = {0};
 double rightPositionHistory[meanWindowSize] = {0};
@@ -179,10 +179,37 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
       sendMessage(direction);
       isSliding = false;
       stopMessageSent = false;
-      delay(5000);
+      
+      pauseUntilContact();
     }
     // Apply decay to previousMeanPos to simulate resting state
     previousMeanPos *= restingDecayFactor;
+  }
+}
+
+
+void pauseUntilContact() {
+  Serial.println("Pausing system until contact is detected...");
+
+  while (true) {
+    // Check if any slider is being touched
+    bool contactDetected = false;
+    for (int i = 0; i < 3; i++) {
+      double leftValue = leftSliders[i].sensor.capacitiveSensor(20);
+      double rightValue = rightSliders[i].sensor.capacitiveSensor(20);
+
+      if (leftValue > leftSliders[i].minThreshold || rightValue > rightSliders[i].minThreshold) {
+        contactDetected = true;
+        break;
+      }
+    }
+
+    if (contactDetected) {
+      Serial.println("Contact detected! Resuming operation.");
+      break;
+    }
+
+    delay(100); // Small delay to avoid excessive looping
   }
 }
 
