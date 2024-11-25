@@ -49,8 +49,8 @@ SliderConfig rightSliders[] = {
 
 // Sliding state variables
 const int meanWindowSize = 3; // Reduced for responsiveness
-const double slideThreshold = 0.05; // Reduced for greater sensitivity
-const unsigned long slideEndTimeout = 1000; // Increased for slower movements
+const double slideThreshold = 0.03; // Reduced for greater sensitivity
+const unsigned long slideEndTimeout = 500; // Increased for slower movements
 const double restingDecayFactor = 0.95; // Decay for resting pressure
 double leftPositionHistory[meanWindowSize] = {0};
 double rightPositionHistory[meanWindowSize] = {0};
@@ -179,7 +179,7 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
       sendMessage(direction);
       isSliding = false;
       stopMessageSent = false;
-      delay(5000); // Avoid frequent "LIGHT" triggers
+      delay(5000);
     }
     // Apply decay to previousMeanPos to simulate resting state
     previousMeanPos *= restingDecayFactor;
