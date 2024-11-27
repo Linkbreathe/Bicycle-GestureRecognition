@@ -62,6 +62,8 @@ unsigned long lastSlideLeftTime = 0, lastSlideRightTime = 0;
 // Messaging state
 bool stopMessageSent = false;
 
+bool stopBrakingMessageSent = false;
+
 // Parameter settings for braking
 const int fsrPin = 2; 
 
@@ -228,18 +230,26 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
   }
 }
 
-void detectBraking(){
+void detectBraking() {
   int rawValue = analogRead(fsrPin); // Read FSR analog signal
   float voltage = rawValue * (3.3 / 4095.0); // Convert to voltage value (assuming a 0-3.3V range)
 
   // Calculate net signal (subtract baseline)
   float netVoltage = voltage - baselineVoltage;
-  //Serial.println(netVoltage);
-  // Press detection
-  if (netVoltage > threshold) {
-    sendMessage("Braking");
-  } 
 
+  // Check if the braking condition is met
+  if (netVoltage > threshold) {
+    // Send "Braking" message only if it's not already sent
+    sendMessage("BRAKING");
+    delay(5000);
+    stopBrakingMessageSent = false; // Reset the flag when braking starts
+  } else {
+    // If braking has stopped and "STOP BRAKING" message is not sent, send it
+    if (!stopBrakingMessageSent) {
+      sendMessage("STOP BRAKING");
+      stopBrakingMessageSent = true; // Mark that the message was sent
+    }
+  }
 }
 
 void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
