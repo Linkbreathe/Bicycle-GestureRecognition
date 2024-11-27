@@ -62,6 +62,16 @@ unsigned long lastSlideLeftTime = 0, lastSlideRightTime = 0;
 // Messaging state
 bool stopMessageSent = false;
 
+// Parameter settings for braking
+const int fsrPin = 2; 
+
+const unsigned long calibrationTime = 5000; // Calibration time (milliseconds)
+const int numCalibrationSamples = 100;      // Number of calibration samples
+const float threshold = 0.18;                // Press detection threshold (unit: volts)
+
+float baselineVoltage = 0.0; // Baseline voltage
+
+
 // Function prototypes
 double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[], int &historyIndex, double &previousMeanPos, bool &isSliding, unsigned long &lastSlideTime, String direction);
 double calculateRollingMean(double positionHistory[]);
@@ -71,8 +81,11 @@ void checkAndSendStopMessage();
 
 void setup() {
   Serial.begin(9600);
-  SerialBT.begin(myName, true);
 
+  analogReadResolution(12); // Use ESP32's 12-bit ADC resolutiony nl 
+  calibrateBaseline();      // Perform baseline calibration
+  
+  SerialBT.begin(myName, true);
   Serial.printf("The device \"%s\" started in master mode, ensure slave BT device is on!\n", myName.c_str());
 
   bool connected;
@@ -103,10 +116,34 @@ void loop() {
   double leftMeanPos = calculateWeightedPosition(leftSliders, leftPositionHistory, leftHistoryIndex, previousLeftMeanPos, isSlidingLeft, lastSlideLeftTime, "LEFT");
   double rightMeanPos = calculateWeightedPosition(rightSliders, rightPositionHistory, rightHistoryIndex, previousRightMeanPos, isSlidingRight, lastSlideRightTime, "RIGHT");
 
+  // Check if users braking
+  detectBraking();
+
   // Check if stop message should be sent
   checkAndSendStopMessage();
 
   delay(10);
+}
+
+// Baseline calibration function
+void calibrateBaseline() {
+  Serial.println("Calibrating baseline...");
+  unsigned long startTime = millis();
+  unsigned long endTime = startTime + calibrationTime;
+  unsigned long sum = 0;
+  int samples = 0;
+
+  while (millis() < endTime && samples < numCalibrationSamples) {
+    int raw = analogRead(fsrPin);
+    sum += raw;
+    samples++;
+    delay(10); // Read once every 10 milliseconds
+  }
+
+  baselineVoltage = (sum / (float)samples) * (3.3 / 4095.0);
+  Serial.print("Baseline Voltage: ");
+  Serial.println(baselineVoltage, 3);
+  Serial.println("Calibration complete.");
 }
 
 double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[], int &historyIndex, double &previousMeanPos, bool &isSliding, unsigned long &lastSlideTime, String direction) {
@@ -187,6 +224,19 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
   }
 }
 
+void detectBraking(){
+  int rawValue = analogRead(fsrPin); // Read FSR analog signal
+  float voltage = rawValue * (3.3 / 4095.0); // Convert to voltage value (assuming a 0-3.3V range)
+
+  // Calculate net signal (subtract baseline)
+  float netVoltage = voltage - baselineVoltage;
+  //Serial.println(netVoltage);
+  // Press detection
+  if (netVoltage > threshold) {
+    sendMessage("Braking");
+  } 
+
+}
 
 void pauseUntilContact() {
   Serial.println("Pausing system until contact is detected...");
