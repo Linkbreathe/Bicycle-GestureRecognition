@@ -36,21 +36,21 @@ struct SliderConfig {
 
 // Initialize left and right sliders with reduced thresholds
 SliderConfig leftSliders[] = {
-  {CapacitiveSensor(senderPin, 13), 60, 147, 0.0},
-  {CapacitiveSensor(senderPin, 12), 30, 130, 0.5},
-  {CapacitiveSensor(senderPin, 14), 40, 154, 1.0}
+  {CapacitiveSensor(senderPin, 13), 150, 300, 0.0},
+  {CapacitiveSensor(senderPin, 12), 150, 300, 0.5},
+  {CapacitiveSensor(senderPin, 14), 150, 300, 1.0}
 };
 
 SliderConfig rightSliders[] = {
-  {CapacitiveSensor(senderPin, 26), 80, 147, 0.0},
-  {CapacitiveSensor(senderPin, 33), 65, 130, 0.5},
-  {CapacitiveSensor(senderPin, 32), 60, 154, 1.0}
+  {CapacitiveSensor(senderPin, 26), 150, 300, 1.0},
+  {CapacitiveSensor(senderPin, 33), 150, 300, 0.5},
+  {CapacitiveSensor(senderPin, 32), 150, 300, 0.0}
 };
 
 // Sliding state variables
-const int meanWindowSize = 3; // Reduced for responsiveness
-const double slideThreshold = 0.02; // Reduced for greater sensitivity
-const unsigned long slideEndTimeout = 750; // Increased for slower movements
+const int meanWindowSize = 1; // Reduced for responsiveness
+const double slideThreshold = 0.4; // Reduced for greater sensitivity
+const unsigned long slideEndTimeout = 1000; // Increased for slower movements
 const double restingDecayFactor = 0.95; // Decay for resting pressure
 double leftPositionHistory[meanWindowSize] = {0};
 double rightPositionHistory[meanWindowSize] = {0};
@@ -65,12 +65,11 @@ bool stopMessageSent = false;
 // Parameter settings for braking
 const int fsrPin = 2; 
 
-const unsigned long calibrationTime = 5000; // Calibration time (milliseconds)
-const int numCalibrationSamples = 100;      // Number of calibration samples
-const float threshold = 0.18;                // Press detection threshold (unit: volts)
+const unsigned long calibrationTime = 5000;
+const int numCalibrationSamples = 100;
+const float threshold = 0.18;
 
-float baselineVoltage = 0.0; // Baseline voltage
-
+float baselineVoltage = 0.0;
 
 // Function prototypes
 double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[], int &historyIndex, double &previousMeanPos, bool &isSliding, unsigned long &lastSlideTime, String direction);
@@ -84,8 +83,9 @@ void setup() {
 
   analogReadResolution(12); // Use ESP32's 12-bit ADC resolutiony nl 
   calibrateBaseline();      // Perform baseline calibration
-  
+
   SerialBT.begin(myName, true);
+
   Serial.printf("The device \"%s\" started in master mode, ensure slave BT device is on!\n", myName.c_str());
 
   bool connected;
@@ -109,23 +109,28 @@ void setup() {
   } else {
     Serial.println("Failed to connect after multiple attempts.");
   }
+
+  calibrateSliders(leftSliders, 3, "Left");
+  calibrateSliders(rightSliders, 3, "Right");
 }
 
 void loop() {
-  // Calculate positions for sliders
   double leftMeanPos = calculateWeightedPosition(leftSliders, leftPositionHistory, leftHistoryIndex, previousLeftMeanPos, isSlidingLeft, lastSlideLeftTime, "LEFT");
   double rightMeanPos = calculateWeightedPosition(rightSliders, rightPositionHistory, rightHistoryIndex, previousRightMeanPos, isSlidingRight, lastSlideRightTime, "RIGHT");
 
-  // Check if users braking
   detectBraking();
 
-  // Check if stop message should be sent
+  Serial.print(" LeftMean:"); Serial.print(leftMeanPos);
+  Serial.print(" RightMean:"); Serial.println(rightMeanPos);
+
+  Serial.print(" LeftMean:"); Serial.print(leftMeanPos);
+  Serial.print(" RightMean:"); Serial.println(rightMeanPos);
+
   checkAndSendStopMessage();
 
   delay(10);
 }
 
-// Baseline calibration function
 void calibrateBaseline() {
   Serial.println("Calibrating baseline...");
   unsigned long startTime = millis();
@@ -152,11 +157,11 @@ double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[
   double totalWeight = 0.0;
   double weightedPosition = 0.0;
 
-  Serial.printf("Raw sensor values for %s sliders:\n", direction.c_str());
+  //Serial.printf("Raw sensor values for %s sliders:\n", direction.c_str());
 
   for (int i = 0; i < 3; i++) {
-    double sensorValue = sliders[i].sensor.capacitiveSensor(20); // Increased sampling for better sensitivity
-    Serial.printf("  Slider %d: %lf (minThreshold: %d)\n", i, sensorValue, sliders[i].minThreshold); // Debug output for raw values
+    double sensorValue = sliders[i].sensor.capacitiveSensor(10); // Increased sampling for better sensitivity
+    //Serial.printf("  Slider %d: %lf (minThreshold: %d)\n", i, sensorValue, sliders[i].minThreshold); // Debug output for raw values
     
     if (sensorValue > sliders[i].minThreshold) {
       touchCount++;
@@ -176,9 +181,8 @@ double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[
   double meanPos = calculateRollingMean(positionHistory);
   detectSlide(meanPos, previousMeanPos, isSliding, lastSlideTime, direction);
 
-  if (meanPos >= 0.0) {
-    Serial.printf("%s, Weighted Mean Position: %.2f\n", direction.c_str(), meanPos);
-  }
+  Serial.printf("%s, Weighted Mean Position: %.2f\n", direction.c_str(), meanPos);
+  
 
   return meanPos;
 }
@@ -238,6 +242,44 @@ void detectBraking(){
 
 }
 
+void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
+  Serial.printf("\n--- %s Sliders Calibration Start ---\n", side.c_str());
+  
+  // Baseline (No Touch) Calibration
+  for (int i = 0; i < numSliders; i++) {
+    long baseValue = 0;
+    Serial.printf("\n[INFO] Please **DO NOT TOUCH** Slider %d (%s Side). Calibration in progress...\n", i + 1, side.c_str());
+    delay(4000); // Increased time for user to avoid accidental contact
+
+    for (int j = 0; j < 15; j++) { // More readings for stability
+      baseValue += sliders[i].sensor.capacitiveSensor(10);
+      delay(10);
+    }
+    baseValue /= 15;
+    sliders[i].minThreshold = baseValue + 10; // Add margin for noise
+    Serial.printf("[INFO] Slider %d (%s) baseline value: %ld | Min Threshold: %d\n", i + 1, side.c_str(), baseValue, sliders[i].minThreshold);
+  }
+  
+  // Touch Calibration
+  for (int i = 0; i < numSliders; i++) {
+    long touchValue = 0;
+    Serial.printf("\n[INFO] Please **TOUCH** Slider %d (%s Side) firmly and hold for calibration...\n", i + 1, side.c_str());
+    delay(5000); // Give enough time to ensure steady contact
+
+    for (int j = 0; j < 15; j++) {
+      touchValue += sliders[i].sensor.capacitiveSensor(10);
+      delay(10);
+    }
+    touchValue /= 15;
+    
+    sliders[i].maxValue = touchValue;
+    Serial.printf("[INFO] Slider %d (%s) touch value: %ld | Max Value set to: %d\n", i + 1, side.c_str(), touchValue, sliders[i].maxValue);
+  }
+
+  Serial.printf("\n--- %s Sliders Calibration Complete ---\n", side.c_str());
+}
+
+
 void pauseUntilContact() {
   Serial.println("Pausing system until contact is detected...");
 
@@ -245,10 +287,10 @@ void pauseUntilContact() {
     // Check if any slider is being touched
     bool contactDetected = false;
     for (int i = 0; i < 3; i++) {
-      double leftValue = leftSliders[i].sensor.capacitiveSensor(20);
-      double rightValue = rightSliders[i].sensor.capacitiveSensor(20);
+      double leftValue = leftSliders[i].sensor.capacitiveSensor(10);
+      double rightValue = rightSliders[i].sensor.capacitiveSensor(10);
 
-      if (leftValue > leftSliders[i].minThreshold || rightValue > rightSliders[i].minThreshold) {
+      if (leftValue > leftSliders[i].minThreshold && rightValue > rightSliders[i].minThreshold) {
         contactDetected = true;
         break;
       }
