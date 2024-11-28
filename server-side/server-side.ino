@@ -241,7 +241,6 @@ void detectBraking() {
   if (netVoltage > threshold) {
     // Send "Braking" message only if it's not already sent
     sendMessage("BRAKING");
-    delay(5000);
     stopBrakingMessageSent = false; // Reset the flag when braking starts
   } else {
     // If braking has stopped and "STOP BRAKING" message is not sent, send it
@@ -266,7 +265,7 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
       delay(10);
     }
     baseValue /= 15;
-    sliders[i].minThreshold = baseValue + 10; // Add margin for noise
+    sliders[i].minThreshold = baseValue + 40; // Add margin for noise
     Serial.printf("[INFO] Slider %d (%s) baseline value: %ld | Min Threshold: %d\n", i + 1, side.c_str(), baseValue, sliders[i].minThreshold);
   }
   
