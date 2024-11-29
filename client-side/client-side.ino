@@ -47,7 +47,8 @@ void loop() {
       digitalWrite(gpioPin_right, LOW);
     } else if (incoming == "BRAKING") {
       digitalWrite(gpioPin_braking, HIGH);
-    } else if (incoming == "NOT BRAKING") {
+    } else if (incoming == "STOP BRAKING") {
+      Serial.print("Hallo");
       digitalWrite(gpioPin_braking, LOW);
     }
   }

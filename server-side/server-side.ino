@@ -48,9 +48,10 @@ SliderConfig rightSliders[] = {
 };
 
 // Sliding state variables
-const int meanWindowSize = 1; // Reduced for responsiveness
-const double slideThreshold = 0.4; // Reduced for greater sensitivity
-const unsigned long slideEndTimeout = 1000; // Increased for slower movements
+const int meanWindowSize = 5; // Reduced for responsiveness
+const double slideThreshold = 0.1; // Reduced for greater sensitivity
+const double touchSensitivity = 0.3;
+const unsigned long slideEndTimeout = 1500; // Increased for slower movements
 const double restingDecayFactor = 0.95; // Decay for resting pressure
 double leftPositionHistory[meanWindowSize] = {0};
 double rightPositionHistory[meanWindowSize] = {0};
@@ -65,7 +66,7 @@ bool stopMessageSent = false;
 bool stopBrakingMessageSent = false;
 
 // Parameter settings for braking
-const int fsrPin = 2; 
+const int fsrPin = 2;
 
 const unsigned long calibrationTime = 5000;
 const int numCalibrationSamples = 100;
@@ -257,15 +258,13 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
   // Baseline (No Touch) Calibration
   for (int i = 0; i < numSliders; i++) {
     long baseValue = 0;
-    Serial.printf("\n[INFO] Please **DO NOT TOUCH** Slider %d (%s Side). Calibration in progress...\n", i + 1, side.c_str());
-    delay(4000); // Increased time for user to avoid accidental contact
 
-    for (int j = 0; j < 15; j++) { // More readings for stability
+    for (int j = 0; j < 1000; j++) { // More readings for stability
       baseValue += sliders[i].sensor.capacitiveSensor(10);
       delay(10);
     }
-    baseValue /= 15;
-    sliders[i].minThreshold = baseValue + 40; // Add margin for noise
+    baseValue /= 1000;
+    sliders[i].minThreshold = baseValue; // Add margin for noise
     Serial.printf("[INFO] Slider %d (%s) baseline value: %ld | Min Threshold: %d\n", i + 1, side.c_str(), baseValue, sliders[i].minThreshold);
   }
   
@@ -273,16 +272,23 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
   for (int i = 0; i < numSliders; i++) {
     long touchValue = 0;
     Serial.printf("\n[INFO] Please **TOUCH** Slider %d (%s Side) firmly and hold for calibration...\n", i + 1, side.c_str());
-    delay(5000); // Give enough time to ensure steady contact
 
-    for (int j = 0; j < 15; j++) {
+    for (int j = 0; j < 1000; j++) {
       touchValue += sliders[i].sensor.capacitiveSensor(10);
       delay(10);
     }
-    touchValue /= 15;
+    touchValue /= 1000;
     
     sliders[i].maxValue = touchValue;
     Serial.printf("[INFO] Slider %d (%s) touch value: %ld | Max Value set to: %d\n", i + 1, side.c_str(), touchValue, sliders[i].maxValue);
+  }
+
+  for (int i = 0; i < numSliders; i++) {
+    sliders[i].minThreshold = sliders[i].minThreshold + (sliders[i].maxValue - sliders[i].minThreshold) * touchSensitivity;
+
+    Serial.printf("[INFO] Final minThreshold for Slider %d: %ld | Max Value: %ld | Sensitivity Applied: %f\n",
+                i + 1, sliders[i].minThreshold, sliders[i].maxValue, touchSensitivity);
+
   }
 
   Serial.printf("\n--- %s Sliders Calibration Complete ---\n", side.c_str());
