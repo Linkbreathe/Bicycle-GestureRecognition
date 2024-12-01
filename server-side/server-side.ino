@@ -254,7 +254,7 @@ void detectBraking() {
 
 void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
   Serial.printf("\n--- %s Sliders Calibration Start ---\n", side.c_str());
-  
+
   // Baseline (No Touch) Calibration
   for (int i = 0; i < numSliders; i++) {
     long baseValue = 0;
@@ -267,11 +267,28 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
     sliders[i].minThreshold = baseValue; // Add margin for noise
     Serial.printf("[INFO] Slider %d (%s) baseline value: %ld | Min Threshold: %d\n", i + 1, side.c_str(), baseValue, sliders[i].minThreshold);
   }
-  
+
+  Serial.println("\n[INFO] Waiting for all sliders to be touched...");
+
+  // Wait until all sliders are touched
+  bool allTouched = false;
+  while (!allTouched) {
+    allTouched = true;
+    for (int i = 0; i < numSliders; i++) {
+      long sensorValue = sliders[i].sensor.capacitiveSensor(10);
+      if (sensorValue <= sliders[i].minThreshold) {
+        allTouched = false;
+        break;
+      }
+    }
+    delay(100); // Check every 100ms
+  }
+
+  Serial.println("[INFO] All sliders touched! Starting touch calibration...");
+
   // Touch Calibration
   for (int i = 0; i < numSliders; i++) {
     long touchValue = 0;
-    Serial.printf("\n[INFO] Please **TOUCH** Slider %d (%s Side) firmly and hold for calibration...\n", i + 1, side.c_str());
 
     for (int j = 0; j < 1000; j++) {
       touchValue += sliders[i].sensor.capacitiveSensor(10);
@@ -288,11 +305,11 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
 
     Serial.printf("[INFO] Final minThreshold for Slider %d: %ld | Max Value: %ld | Sensitivity Applied: %f\n",
                 i + 1, sliders[i].minThreshold, sliders[i].maxValue, touchSensitivity);
-
   }
 
   Serial.printf("\n--- %s Sliders Calibration Complete ---\n", side.c_str());
 }
+
 
 
 void pauseUntilContact() {
