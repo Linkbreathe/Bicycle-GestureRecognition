@@ -2,7 +2,7 @@
 #include <CapacitiveSensor.h>
 
 // Define preprocessor macros
-#define USE_NAME // Comment to use MAC address instead of a slaveName
+#define USE_NAME  // Comment to use MAC address instead of a slaveName
 
 // Check if Bluetooth is enabled
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
@@ -20,7 +20,7 @@ BluetoothSerial SerialBT;
 String slaveName = "ESP32-BT-Slave";
 #else
 String MACadd = "AA:BB:CC:11:22:33";
-uint8_t address[6] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33};
+uint8_t address[6] = { 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33 };
 #endif
 
 String myName = "ESP32-BT-Master";
@@ -36,25 +36,25 @@ struct SliderConfig {
 
 // Initialize left and right sliders with reduced thresholds
 SliderConfig leftSliders[] = {
-  {CapacitiveSensor(senderPin, 13), 150, 300, 0.0},
-  {CapacitiveSensor(senderPin, 12), 150, 300, 0.5},
-  {CapacitiveSensor(senderPin, 14), 150, 300, 1.0}
+  { CapacitiveSensor(senderPin, 13), 150, 300, 0.0 },
+  { CapacitiveSensor(senderPin, 12), 150, 300, 0.5 },
+  { CapacitiveSensor(senderPin, 14), 150, 300, 1.0 }
 };
 
 SliderConfig rightSliders[] = {
-  {CapacitiveSensor(senderPin, 26), 150, 300, 1.0},
-  {CapacitiveSensor(senderPin, 33), 150, 300, 0.5},
-  {CapacitiveSensor(senderPin, 32), 150, 300, 0.0}
+  { CapacitiveSensor(senderPin, 26), 150, 300, 1.0 },
+  { CapacitiveSensor(senderPin, 33), 150, 300, 0.5 },
+  { CapacitiveSensor(senderPin, 32), 150, 300, 0.0 }
 };
 
 // Sliding state variables
-const int meanWindowSize = 5; // Reduced for responsiveness
-const double slideThreshold = 0.1; // Reduced for greater sensitivity
+const int meanWindowSize = 5;       // Reduced for responsiveness
+const double slideThreshold = 0.1;  // Reduced for greater sensitivity
 const double touchSensitivity = 0.3;
-const unsigned long slideEndTimeout = 1500; // Increased for slower movements
-const double restingDecayFactor = 0.95; // Decay for resting pressure
-double leftPositionHistory[meanWindowSize] = {0};
-double rightPositionHistory[meanWindowSize] = {0};
+const unsigned long slideEndTimeout = 1500;  // Increased for slower movements
+const double restingDecayFactor = 0.95;      // Decay for resting pressure
+double leftPositionHistory[meanWindowSize] = { 0 };
+double rightPositionHistory[meanWindowSize] = { 0 };
 int leftHistoryIndex = 0, rightHistoryIndex = 0;
 double previousLeftMeanPos = -1.0, previousRightMeanPos = -1.0;
 bool isSlidingLeft = false, isSlidingRight = false;
@@ -70,9 +70,15 @@ const int fsrPin = 2;
 
 const unsigned long calibrationTime = 5000;
 const int numCalibrationSamples = 100;
-const float threshold = 0.18;
+const float threshold = 0.3;
 
 float baselineVoltage = 0.0;
+
+// Parameter for reconnecting
+bool isReconnect = false;
+
+// Parameter for modifying the braking
+String previousMessage = "";
 
 // Function prototypes
 double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[], int &historyIndex, double &previousMeanPos, bool &isSliding, unsigned long &lastSlideTime, String direction);
@@ -81,15 +87,20 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
 void sendMessage(String message);
 void checkAndSendStopMessage();
 
+
+
 void setup() {
   Serial.begin(9600);
 
-  analogReadResolution(12); // Use ESP32's 12-bit ADC resolutiony nl 
-  calibrateBaseline();      // Perform baseline calibration
+  analogReadResolution(12);  // Use ESP32's 12-bit ADC resolutiony nl
+  calibrateBaseline();       // Perform baseline calibration
 
   SerialBT.begin(myName, true);
 
   Serial.printf("The device \"%s\" started in master mode, ensure slave BT device is on!\n", myName.c_str());
+
+  Serial.println("[INFO] Detect the bluebooth connection - 1");
+  Serial.println(SerialBT.hasClient());
 
   bool connected;
 #ifdef USE_NAME
@@ -115,19 +126,29 @@ void setup() {
 
   calibrateSliders(leftSliders, 3, "Left");
   calibrateSliders(rightSliders, 3, "Right");
+
+  Serial.println("[INFO] Detect the bluebooth connection - 2");
+  Serial.println(SerialBT.hasClient());
 }
 
 void loop() {
+  
+  tryToReconnectBluetooh();
+
   double leftMeanPos = calculateWeightedPosition(leftSliders, leftPositionHistory, leftHistoryIndex, previousLeftMeanPos, isSlidingLeft, lastSlideLeftTime, "LEFT");
   double rightMeanPos = calculateWeightedPosition(rightSliders, rightPositionHistory, rightHistoryIndex, previousRightMeanPos, isSlidingRight, lastSlideRightTime, "RIGHT");
 
   detectBraking();
 
-  Serial.print(" LeftMean:"); Serial.print(leftMeanPos);
-  Serial.print(" RightMean:"); Serial.println(rightMeanPos);
+  // Serial.print(" LeftMean:");
+  // Serial.print(leftMeanPos);
+  // Serial.print(" RightMean:");
+  // Serial.println(rightMeanPos);
 
-  Serial.print(" LeftMean:"); Serial.print(leftMeanPos);
-  Serial.print(" RightMean:"); Serial.println(rightMeanPos);
+  // Serial.print(" LeftMean:");
+  // Serial.print(leftMeanPos);
+  // Serial.print(" RightMean:");
+  // Serial.println(rightMeanPos);
 
   checkAndSendStopMessage();
 
@@ -145,7 +166,7 @@ void calibrateBaseline() {
     int raw = analogRead(fsrPin);
     sum += raw;
     samples++;
-    delay(10); // Read once every 10 milliseconds
+    delay(10);  // Read once every 10 milliseconds
   }
 
   baselineVoltage = (sum / (float)samples) * (3.3 / 4095.0);
@@ -163,9 +184,9 @@ double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[
   //Serial.printf("Raw sensor values for %s sliders:\n", direction.c_str());
 
   for (int i = 0; i < 3; i++) {
-    double sensorValue = sliders[i].sensor.capacitiveSensor(10); // Increased sampling for better sensitivity
+    double sensorValue = sliders[i].sensor.capacitiveSensor(10);  // Increased sampling for better sensitivity
     //Serial.printf("  Slider %d: %lf (minThreshold: %d)\n", i, sensorValue, sliders[i].minThreshold); // Debug output for raw values
-    
+
     if (sensorValue > sliders[i].minThreshold) {
       touchCount++;
       double weight = sensorValue / sliders[i].maxValue;
@@ -184,8 +205,8 @@ double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[
   double meanPos = calculateRollingMean(positionHistory);
   detectSlide(meanPos, previousMeanPos, isSliding, lastSlideTime, direction);
 
-  Serial.printf("%s, Weighted Mean Position: %.2f\n", direction.c_str(), meanPos);
-  
+  // Serial.printf("%s, Weighted Mean Position: %.2f\n", direction.c_str(), meanPos);
+
 
   return meanPos;
 }
@@ -200,7 +221,7 @@ double calculateRollingMean(double positionHistory[]) {
     if (positionHistory[i] >= 0) {
       mean += positionHistory[i] * weight;
       totalWeight += weight;
-      weight *= 0.8; // Decay factor for older readings
+      weight *= 0.8;  // Decay factor for older readings
     }
   }
 
@@ -223,7 +244,7 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
       sendMessage(direction);
       isSliding = false;
       stopMessageSent = false;
-      
+
       pauseUntilContact();
     }
     // Apply decay to previousMeanPos to simulate resting state
@@ -232,22 +253,21 @@ void detectSlide(double meanPos, double &previousMeanPos, bool &isSliding, unsig
 }
 
 void detectBraking() {
-  int rawValue = analogRead(fsrPin); // Read FSR analog signal
-  float voltage = rawValue * (3.3 / 4095.0); // Convert to voltage value (assuming a 0-3.3V range)
+  int rawValue = analogRead(fsrPin);          
+  float voltage = rawValue * (3.3 / 4095.0); 
 
-  // Calculate net signal (subtract baseline)
   float netVoltage = voltage - baselineVoltage;
+  // Serial.println(netVoltage);
 
-  // Check if the braking condition is met
   if (netVoltage > threshold) {
-    // Send "Braking" message only if it's not already sent
-    sendMessage("BRAKING");
-    stopBrakingMessageSent = false; // Reset the flag when braking starts
+    if (previousMessage != "BRAKING") {
+      sendMessage("BRAKING");
+      previousMessage = "BRAKING"; 
+    }
   } else {
-    // If braking has stopped and "STOP BRAKING" message is not sent, send it
-    if (!stopBrakingMessageSent) {
+    if (previousMessage != "STOP BRAKING") {
       sendMessage("STOP BRAKING");
-      stopBrakingMessageSent = true; // Mark that the message was sent
+      previousMessage = "STOP BRAKING"; 
     }
   }
 }
@@ -259,12 +279,12 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
   for (int i = 0; i < numSliders; i++) {
     long baseValue = 0;
 
-    for (int j = 0; j < 1000; j++) { // More readings for stability
+    for (int j = 0; j < 1000; j++) {  // More readings for stability
       baseValue += sliders[i].sensor.capacitiveSensor(10);
       delay(10);
     }
     baseValue /= 1000;
-    sliders[i].minThreshold = baseValue; // Add margin for noise
+    sliders[i].minThreshold = baseValue;  // Add margin for noise
     Serial.printf("[INFO] Slider %d (%s) baseline value: %ld | Min Threshold: %d\n", i + 1, side.c_str(), baseValue, sliders[i].minThreshold);
   }
 
@@ -281,7 +301,7 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
         break;
       }
     }
-    delay(100); // Check every 100ms
+    delay(100);  // Check every 100ms
   }
 
   Serial.println("[INFO] All sliders touched! Starting touch calibration...");
@@ -295,7 +315,7 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
       delay(10);
     }
     touchValue /= 1000;
-    
+
     sliders[i].maxValue = touchValue;
     Serial.printf("[INFO] Slider %d (%s) touch value: %ld | Max Value set to: %d\n", i + 1, side.c_str(), touchValue, sliders[i].maxValue);
   }
@@ -304,7 +324,7 @@ void calibrateSliders(SliderConfig sliders[], int numSliders, String side) {
     sliders[i].minThreshold = sliders[i].minThreshold + (sliders[i].maxValue - sliders[i].minThreshold) * touchSensitivity;
 
     Serial.printf("[INFO] Final minThreshold for Slider %d: %ld | Max Value: %ld | Sensitivity Applied: %f\n",
-                i + 1, sliders[i].minThreshold, sliders[i].maxValue, touchSensitivity);
+                  i + 1, sliders[i].minThreshold, sliders[i].maxValue, touchSensitivity);
   }
 
   Serial.printf("\n--- %s Sliders Calibration Complete ---\n", side.c_str());
@@ -333,7 +353,7 @@ void pauseUntilContact() {
       break;
     }
 
-    delay(100); // Small delay to avoid excessive looping
+    delay(100);  // Small delay to avoid excessive looping
   }
 }
 
@@ -346,5 +366,24 @@ void checkAndSendStopMessage() {
   if (!stopMessageSent) {
     sendMessage("STOP");
     stopMessageSent = true;
+  }
+}
+
+// Detect if Bluetooth is disconnected, if so, reconnect it
+void tryToReconnectBluetooh(){
+  if(SerialBT.hasClient() < 1){
+    Serial.println("[INFO] Trying to reconnect it...");
+    #ifdef USE_NAME
+      Serial.printf("Connecting to slave BT device named \"%s\"\n", slaveName.c_str());
+      isReconnect = SerialBT.connect(slaveName);
+    #else
+      Serial.printf("Connecting to slave BT device with MAC %s\n", MACadd.c_str());
+      isReconnect = SerialBT.connect(address);
+    #endif    
+  }
+  if(isReconnect){
+    Serial.println("[INFO] RECONNECT SUCCESSFULLY");
+    sendMessage("AAAA");
+    isReconnect = false;
   }
 }
