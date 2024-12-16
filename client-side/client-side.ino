@@ -1,9 +1,5 @@
-#include "BluetoothSerial.h"
-
-// Device Bluetooth Name
-String device_name = "ESP32-BT-Slave";
-
-BluetoothSerial SerialBT;
+#include <WiFi.h>
+#include <esp_now.h>
 
 // GPIO Pins for EL Displays
 const int gpioPin_left = 23;      
@@ -13,7 +9,7 @@ const int gpioPin_braking = 27;
 // Blinking states
 bool blinkingLeft = false;
 bool blinkingRight = false;
-bool blinkBrake = false;
+bool brakeActive = false;
 
 // Separate timing and state variables for each pin
 unsigned long lastBlinkTimeLeft = 0;
@@ -27,6 +23,43 @@ bool pinStateBrake = LOW;
 
 const unsigned long blinkInterval = 500; // Flashing interval (ms)
 
+
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  // this code was in loop for bluetooth, but moved here for Wifi approach 
+  char message[50];
+  if (len < 50) {
+    memcpy(message, incomingData, len);
+    message[len] = '\0'; // Null-terminate the string
+    Serial.println("Received from Bike: " + String(message));
+
+    if (String(message) == "LEFT") {
+      blinkingLeft = true;
+      blinkingRight = false;
+    } 
+    else if (String(message) == "RIGHT") {
+      blinkingRight = true;
+      blinkingLeft = false;
+    } 
+    else if (String(message) == "STOP") {
+      blinkingLeft = false;
+      blinkingRight = false;
+      digitalWrite(gpioPin_left, HIGH);
+      digitalWrite(gpioPin_right, HIGH);
+    } 
+    else if (String(message) == "BRAKING") {
+      brakeActive = true;
+      digitalWrite(gpioPin_braking, HIGH); // turn on brake light continuously
+    } 
+    else if (String(message) == "STOP BRAKING") {
+      brakeActive = false;
+      digitalWrite(gpioPin_braking, LOW);
+    }
+    else if (String(message) == "RECONNECT") {
+      Serial.println("Bike reconnected yay");
+    }
+  }
+}
+
 void setup() {
   Serial.begin(9600);
 
@@ -39,42 +72,22 @@ void setup() {
   digitalWrite(gpioPin_right, HIGH);
   digitalWrite(gpioPin_braking, HIGH);
   
-  // Start Bluetooth
-  SerialBT.begin(device_name);
-  Serial.printf("Device \"%s\" started. Pair it via Bluetooth!\n", device_name.c_str());
+  
+  // init esp now
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Register receive callback
+  esp_now_register_recv_cb(OnDataRecv);
+
 }
 
 void loop() {
-
-  // Handle incoming Bluetooth commands
-  if (SerialBT.available()) {
-    String incoming = SerialBT.readStringUntil('\n');
-    // clear the buffer
-    SerialBT.read();
-    incoming.trim();
-    Serial.println("Received from Master: " + incoming);
-
-    if (incoming == "LEFT") {
-      blinkingLeft = true;
-      blinkingRight = false;
-      // Ensure braking light state is maintained
-    } else if (incoming == "RIGHT") {
-      blinkingRight = true;
-      blinkingLeft = false;
-      // Ensure braking light state is maintained
-    } else if (incoming == "STOP") {
-      blinkingLeft = false;
-      blinkingRight = false;
-      digitalWrite(gpioPin_left, HIGH);
-      digitalWrite(gpioPin_right, HIGH);
-    } else if (incoming == "BRAKING") {
-      blinkBrake = true;
-      // Optionally, set braking light to start blinking immediately
-    } else if (incoming == "STOP BRAKING") {
-      blinkBrake = false;
-      digitalWrite(gpioPin_braking, LOW); // Switch off the brake lights.
-    }
-  }
 
   unsigned long currentTime = millis();
 
@@ -96,14 +109,7 @@ void loop() {
     }
   }
 
-  // Handle braking blinking
-  if (blinkBrake) {
-    if (currentTime - lastBlinkTimeBrake >= blinkInterval) {
-      lastBlinkTimeBrake = currentTime;
-      pinStateBrake = !pinStateBrake;
-      digitalWrite(gpioPin_braking, pinStateBrake ? HIGH : LOW);
-    }
-  }
+// solid brake no need for blinkBrake
 
   // Small delay to prevent high CPU usage
   delay(10);

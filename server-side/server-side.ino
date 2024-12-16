@@ -1,27 +1,8 @@
-#include "BluetoothSerial.h"
+#include <WiFi.h>
+#include <esp_now.h>
 #include <CapacitiveSensor.h>
 
-// Define preprocessor macros
-#define USE_NAME  // Comment to use MAC address instead of a slaveName
-
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-#error Bluetooth is not enabled! Please run make menuconfig to enable it.
-#endif
-
-#if !defined(CONFIG_BT_SPP_ENABLED)
-#error Serial Port Profile for Bluetooth is not available or not enabled. Only available for ESP32.
-#endif
-
-BluetoothSerial SerialBT;
-
-// Bluetooth configuration
-#ifdef USE_NAME
-String slaveName = "ESP32-BT-Slave";
-#else
-String MACadd = "88:BE:D1:22:C9:30";
-uint8_t address[6] = { 0x88, 0xBE, 0xD1, 0x22, 0xC9, 0x30 };
-#endif
-
+uint8_t receiverAddress[] = {0x30, 0xC9, 0x22, 0xD1, 0xBE, 0x88};
 String myName = "ESP32-BT-Master";
 
 // Slider configuration
@@ -83,7 +64,14 @@ bool wasConnected = false;
 unsigned long lastReconnectAttempt = 0;
 const unsigned long reconnectInterval = 5000;  // Try reconnect every 5s if disconnected
 
-String previousMessage = "";
+// callback function to make sure data transfer was succesful
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("Send Status: ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+  if (status != ESP_NOW_SEND_SUCCESS) {
+    wasConnected = false;
+  }
+}
 
 // Function prototypes
 double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[], int &historyIndex, double &previousMeanPos, bool &isSliding, unsigned long &lastSlideTime, String direction);
@@ -103,36 +91,17 @@ void setup() {
   analogReadResolution(12);
   calibrateBaseline();
 
-  SerialBT.begin(myName, true);
-  Serial.printf("The device \"%s\" started in master mode, ensure slave BT device is on!\n", myName.c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
 
-  bool connected;
-#ifdef USE_NAME
-  Serial.printf("Connecting to slave BT device named \"%s\"...\n", slaveName.c_str());
-  connected = SerialBT.connect(slaveName);
-#else
-  Serial.printf("Connecting to slave BT device with MAC %s...\n", MACadd.c_str());
-  connected = SerialBT.connect(address);
-#endif
-
-  int maxRetries = 5;
-  while (!connected && maxRetries--) {
-    Serial.println("Retrying Bluetooth connection...");
-    delay(1000);
-    connected =
-#ifdef USE_NAME
-      SerialBT.connect(slaveName);
-#else
-      SerialBT.connect(address);
-#endif
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
   }
 
-  if (connected) {
-    Serial.println("Connected Successfully!");
-    wasConnected = true;
-  } else {
-    Serial.println("Failed to connect after multiple attempts.");
-  }
+  esp_now_register_send_cb(OnDataSent);
+  addPeerIfNeeded();
 
   calibrateSliders(leftSliders, 3, "Left");
   calibrateSliders(rightSliders, 3, "Right");
@@ -144,7 +113,7 @@ void setup() {
 void loop() {
   attemptReconnectIfNeeded();
 
-  if (SerialBT.hasClient()) {
+  
     double leftMeanPos = calculateWeightedPosition(leftSliders, leftPositionHistory, leftHistoryIndex, previousLeftMeanPos, isSlidingLeft, lastSlideLeftTime, "LEFT");
     double rightMeanPos = calculateWeightedPosition(rightSliders, rightPositionHistory, rightHistoryIndex, previousRightMeanPos, isSlidingRight, lastSlideRightTime, "RIGHT");
 
@@ -162,85 +131,62 @@ void loop() {
         currentState = IDLE;
       }
     }
-  }
+  
 
   delay(10);
 }
 
 
-void calibrateBaseline() {
-  Serial.println("Calibrating baseline (no press on brake)... Please do not press the brake.");
-  unsigned long startTime = millis();
-  unsigned long endTime = startTime + calibrationTime;
-  unsigned long sum = 0;
-  int samples = 0;
 
-  while (millis() < endTime && samples < numCalibrationSamples) {
-    int raw = analogRead(fsrPin);
-    sum += raw;
-    samples++;
-    delay(10);
-  }
 
-  baselineVoltage = (sum / (float)samples) * (3.3 / 4095.0);
-  Serial.print("Baseline Voltage: ");
-  Serial.println(baselineVoltage, 3);
-  Serial.println("Baseline calibration complete.");
-}
-
-void calibrateBrakeThreshold() {
-  Serial.println("\nCalibrating brake threshold...");
-  Serial.println("Please press and hold the brake now. The calibration will start once a press is detected.");
-
-  float pressDetectionThreshold = 0.05;  
-  float netVoltage = 0.0;
-
-  while (true) {
-    int rawValue = analogRead(fsrPin);
-    float voltage = rawValue * (3.3 / 4095.0);
-    netVoltage = voltage - baselineVoltage;
-
-    if (netVoltage > pressDetectionThreshold) {
-      Serial.println("Brake press detected. Starting calibration measurement...");
-      break;
-    } else {
-      static unsigned long lastPromptTime = 0;
-      unsigned long currentTime = millis();
-      if (currentTime - lastPromptTime > 3000) {
-        Serial.println("Please press and hold the brake firmly...");
-        lastPromptTime = currentTime;
-      }
-      delay(100);
+void sendMessage(String message) {
+  if (wasConnected) {
+    esp_err_t result = esp_now_send(receiverAddress, (uint8_t*)message.c_str(), message.length());
+    Serial.print("Sending: ");
+    Serial.println(message);
+    if (result != ESP_OK) {
+      Serial.println("esp_now_send failed");
+      wasConnected = false; 
     }
-  }
-
-  unsigned long pressCalibrationTime = 3000; 
-  unsigned long startTime = millis();
-  float maxNetVoltage = 0.0;
-
-  while (millis() - startTime < pressCalibrationTime) {
-    int rawValue = analogRead(fsrPin);
-    float voltage = rawValue * (3.3 / 4095.0);
-    netVoltage = voltage - baselineVoltage;
-    if (netVoltage > maxNetVoltage) {
-      maxNetVoltage = netVoltage;
-    }
-    delay(10);
-  }
-
-  Serial.println("You can release the brake now.");
-
-  if (maxNetVoltage < pressDetectionThreshold) {
-    Serial.println("[WARNING] Detected very low press values. Using a default threshold of 0.3");
-    brakingThreshold = 0.3;
   } else {
-    brakingThreshold = maxNetVoltage * 0.5;
-    Serial.print("Calibrated braking threshold: ");
-    Serial.println(brakingThreshold, 3);
+    Serial.println("jacket esp not connected...Cannot send: " + message);
   }
-  Serial.println("Brake threshold calibration complete.\n");
 }
 
+// Attempt reconnection only if needed and at controlled intervals
+void attemptReconnectIfNeeded() {
+  if (!wasConnected) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastReconnectAttempt >= reconnectInterval) {
+      lastReconnectAttempt = currentTime;
+      Serial.println("Trying to reconnect to jacket esp...");
+      esp_now_del_peer(receiverAddress);
+      addPeerIfNeeded();
+      if (wasConnected) {
+        sendMessage("RECONNECTED");
+      }
+    }
+  }
+}
+
+void addPeerIfNeeded() {
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, receiverAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) == ESP_OK) {
+    Serial.println("jacekt esp added successfully");
+    wasConnected = true;
+  } else {
+    Serial.println("Failed to add jacket esp");
+    wasConnected = false;
+  }
+}
+
+
+
+// calibration and detection
 double calculateWeightedPosition(SliderConfig sliders[], double positionHistory[], int &historyIndex, double &previousMeanPos, bool &isSliding, unsigned long &lastSlideTime, String direction) {
   double overallPosition = -1.0;
   int touchCount = 0;
@@ -404,34 +350,76 @@ bool bothSidesInContact() {
   return leftContact && rightContact;
 }
 
-void sendMessage(String message) {
-  if (SerialBT.hasClient()) {
-    Serial.println("Sent to Slave: " + message);
-    SerialBT.println(message);
-  } else {
-    Serial.println("[WARNING] No slave connected. Cannot send: " + message);
+
+void calibrateBaseline() {
+  Serial.println("Calibrating baseline (no press on brake)... Please do not press the brake.");
+  unsigned long startTime = millis();
+  unsigned long endTime = startTime + calibrationTime;
+  unsigned long sum = 0;
+  int samples = 0;
+
+  while (millis() < endTime && samples < numCalibrationSamples) {
+    int raw = analogRead(fsrPin);
+    sum += raw;
+    samples++;
+    delay(10);
   }
+
+  baselineVoltage = (sum / (float)samples) * (3.3 / 4095.0);
+  Serial.print("Baseline Voltage: ");
+  Serial.println(baselineVoltage, 3);
+  Serial.println("Baseline calibration complete.");
 }
 
-// Attempt reconnection only if needed and at controlled intervals
-void attemptReconnectIfNeeded() {
-  if (!SerialBT.hasClient()) {
-    unsigned long currentTime = millis();
-    if (!wasConnected || (currentTime - lastReconnectAttempt >= reconnectInterval)) {
-      lastReconnectAttempt = currentTime;
-      Serial.println("[INFO] Trying to reconnect...");
-#ifdef USE_NAME
-      bool isReconnect = SerialBT.connect(slaveName);
-#else
-      bool isReconnect = SerialBT.connect(address);
-#endif
-      if (isReconnect) {
-        Serial.println("[INFO] RECONNECTED SUCCESSFULLY");
-        wasConnected = true;
-        sendMessage("RECONNECT");
-      } else {
-        Serial.println("[INFO] Reconnect attempt failed.");
+void calibrateBrakeThreshold() {
+  Serial.println("\nCalibrating brake threshold...");
+  Serial.println("Please press and hold the brake now. The calibration will start once a press is detected.");
+
+  float pressDetectionThreshold = 0.05;  
+  float netVoltage = 0.0;
+
+  while (true) {
+    int rawValue = analogRead(fsrPin);
+    float voltage = rawValue * (3.3 / 4095.0);
+    netVoltage = voltage - baselineVoltage;
+
+    if (netVoltage > pressDetectionThreshold) {
+      Serial.println("Brake press detected. Starting calibration measurement...");
+      break;
+    } else {
+      static unsigned long lastPromptTime = 0;
+      unsigned long currentTime = millis();
+      if (currentTime - lastPromptTime > 3000) {
+        Serial.println("Please press and hold the brake firmly...");
+        lastPromptTime = currentTime;
       }
+      delay(100);
     }
   }
+
+  unsigned long pressCalibrationTime = 3000; 
+  unsigned long startTime = millis();
+  float maxNetVoltage = 0.0;
+
+  while (millis() - startTime < pressCalibrationTime) {
+    int rawValue = analogRead(fsrPin);
+    float voltage = rawValue * (3.3 / 4095.0);
+    netVoltage = voltage - baselineVoltage;
+    if (netVoltage > maxNetVoltage) {
+      maxNetVoltage = netVoltage;
+    }
+    delay(10);
+  }
+
+  Serial.println("You can release the brake now.");
+
+  if (maxNetVoltage < pressDetectionThreshold) {
+    Serial.println("[WARNING] Detected very low press values. Using a default threshold of 0.3");
+    brakingThreshold = 0.3;
+  } else {
+    brakingThreshold = maxNetVoltage * 0.5;
+    Serial.print("Calibrated braking threshold: ");
+    Serial.println(brakingThreshold, 3);
+  }
+  Serial.println("Brake threshold calibration complete.\n");
 }
